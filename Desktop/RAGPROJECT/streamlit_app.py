@@ -6,19 +6,25 @@ import inngest
 from dotenv import load_dotenv
 import os
 import requests
-import base64
+from chat_history import ChatHistoryManager  # 🆕 NEW
 
 load_dotenv()
 
-# 🎨 Enhanced Page Configuration
+# Initialize chat history manager
+@st.cache_resource
+def get_chat_manager():
+    return ChatHistoryManager()
+
+chat_manager = get_chat_manager()
+
 st.set_page_config(
     page_title="RAG PDF Assistant",
     page_icon="📚",
-    layout="centered",
-    initial_sidebar_state="collapsed"
+    layout="wide",  # Changed to wide for sidebar
+    initial_sidebar_state="expanded"
 )
 
-# 🎨 Custom CSS for better styling
+# 🎨 Custom CSS
 st.markdown("""
 <style>
     .main-header {
@@ -27,39 +33,33 @@ st.markdown("""
         text-align: center;
         margin-bottom: 2rem;
     }
-    .sub-header {
-        font-size: 1.5rem;
-        color: #2e86ab;
-        margin-bottom: 1rem;
-    }
-    .success-box {
-        border: 1px solid #c3e6cb;
-        border-radius: 10px;
-        padding: 20px;
-        margin: 10px 0;
-    }
-    .upload-box {
-        background-color: #f1e8fd;
-        border: 2px dashed #1f77b4;
+    .chat-message-user {
+        background-color: #e3f2fd;
         border-radius: 15px;
-        padding: 30px;
-        text-align: center;
-        margin: 20px 0;
+        padding: 15px;
+        margin: 10px 0;
+        border-left: 5px solid #2196f3;
     }
-    .answer-box {
-        background-color: #f8f9fa;
-        border: 1px solid #dee2e6;
-        border-radius: 10px;
-        padding: 25px;
-        margin: 20px 0;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    .chat-message-bot {
+        background-color:  #e3f2fd;
+        border-radius: 15px;
+        padding: 15px;
+        margin: 10px 0;
+        border-left: 5px solid #9c27b0;
     }
-    .source-item {
-        background-color: #e9ecef;
-        border-radius: 8px;
-        padding: 10px 15px;
+    .history-item {
+        padding: 10px;
         margin: 5px 0;
-        font-size: 0.9rem;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background-color 0.3s;
+    }
+    .history-item:hover {
+        background-color: #f0f0f0;
+    }
+    .history-item.active {
+        background-color: #1f77b4;
+        color: white;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -95,7 +95,7 @@ def send_rag_query_event_sync(question: str) -> str:
             name="rag/query_pdf_ai",
             data={
                 "question": question,
-                "top_k": 5,  # 🎯 Fixed to 5 chunks - removed user option
+                "top_k": 5,
             },
         )
     )
@@ -128,7 +128,39 @@ def wait_for_run_output(event_id: str, timeout_s: float = 120.0, poll_interval_s
             raise TimeoutError(f"Timed out waiting for run output (last status: {last_status})")
         time.sleep(poll_interval_s)
 
-# 🎨 Header Section with Logo
+# 🆕 NEW: Initialize session state
+if 'current_session_id' not in st.session_state:
+    st.session_state.current_session_id = None
+if 'current_pdf_name' not in st.session_state:
+    st.session_state.current_pdf_name = None
+
+# 🆕 SIDEBAR - Chat History
+with st.sidebar:
+    st.markdown("## 📚 Chat History")
+    
+    # Show existing sessions
+    sessions = chat_manager.get_all_sessions()
+    if sessions:
+        st.markdown("### Previous Chats")
+        for session in sessions:
+            is_active = session.session_id == st.session_state.current_session_id
+            emoji = "🔵" if is_active else "⚪"
+            if st.button(
+                f"{emoji} {session.pdf_name} ({len(session.messages)} messages)",
+                key=f"session_{session.session_id}",
+                use_container_width=True
+            ):
+                st.session_state.current_session_id = session.session_id
+                st.session_state.current_pdf_name = session.pdf_name
+                st.rerun()
+    
+    st.markdown("---")
+    if st.button("🆕 New Chat", use_container_width=True):
+        st.session_state.current_session_id = None
+        st.session_state.current_pdf_name = None
+        st.rerun()
+
+# 🎨 MAIN CONTENT
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     st.markdown('<h1 class="main-header">📚 RAG PDF Assistant</h1>', unsafe_allow_html=True)
@@ -136,54 +168,75 @@ with col2:
 
 st.markdown("---")
 
-# 📄 PDF Upload Section
-st.markdown('<div class="sub-header">📤 Upload Your PDF Document</div>', unsafe_allow_html=True)
+# Show current session info
+if st.session_state.current_session_id and st.session_state.current_pdf_name:
+    st.success(f"💬 Currently chatting about: **{st.session_state.current_pdf_name}**")
 
+# 📄 PDF Upload Section
+st.markdown("### 📤 Upload Your PDF Document")
 with st.container():
-    st.markdown('<div class="upload-box">', unsafe_allow_html=True)
     uploaded = st.file_uploader(
         "Drag and drop or click to upload PDF", 
         type=["pdf"], 
         accept_multiple_files=False,
         label_visibility="collapsed"
     )
-    st.markdown('</div>', unsafe_allow_html=True)
 
 if uploaded is not None:
     with st.spinner("🔄 Uploading and processing your document..."):
         path = save_uploaded_pdf(uploaded)
         send_rag_ingest_event_sync(path)
+        
+        # 🆕 NEW: Create chat session when PDF is uploaded
+        if not st.session_state.current_session_id:
+            session_id = chat_manager.create_session(path.name)
+            st.session_state.current_session_id = session_id
+            st.session_state.current_pdf_name = path.name
+        
         time.sleep(0.3)
     
-    st.markdown(f"""
-    <div class="success-box">
-        <h4>✅ Success!</h4>
-        <p>Document <strong>{path.name}</strong> has been uploaded and is being processed.</p>
-        <p><em>You can now ask questions about this document below.</em></p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.success(f"✅ Document **{path.name}** uploaded and ready for questions!")
 
 st.markdown("---")
 
-# 💬 Question Section
-st.markdown('<div class="sub-header">💬 Ask Questions About Your Document</div>', unsafe_allow_html=True)
+# 💬 Current Chat Display
+if st.session_state.current_session_id:
+    # Show chat history
+    messages = chat_manager.get_session_history(st.session_state.current_session_id)
+    
+    if messages:
+        st.markdown("### 💬 Conversation History")
+        for msg in messages:
+            # User question
+            st.markdown(f'<div class="chat-message-user">👤 **You:** {msg.question}</div>', unsafe_allow_html=True)
+            
+            # Bot answer
+            st.markdown(f'<div class="chat-message-bot">🤖 **Assistant:** {msg.answer}</div>', unsafe_allow_html=True)
+            
+            # Sources (collapsible)
+            with st.expander(f"📚 Sources ({len(msg.sources)})"):
+                for source in msg.sources:
+                    st.write(f"• {source}")
 
-with st.form("rag_query_form", clear_on_submit=True):
+# 💬 Question Input
+st.markdown("### 💭 Ask a Question")
+with st.form("rag_query_form", clear_on_submit=False):
     question = st.text_area(
-        "Enter your question here:",
-        placeholder="e.g., What are the main points of this document? Summarize the key findings...",
-        height=100
+        "Enter your question:",
+        placeholder="e.g., What are the main points of this document?",
+        height=100,
+        key="question_input"
     )
     
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        submitted = st.form_submit_button(
-            "🚀 Get Answer", 
-            use_container_width=True,
-            type="primary"
-        )
+    submitted = st.form_submit_button("🚀 Get Answer", use_container_width=True)
 
     if submitted and question.strip():
+        if not st.session_state.current_session_id:
+            # Create a session even if no PDF uploaded (for general questions)
+            session_id = chat_manager.create_session("General Chat")
+            st.session_state.current_session_id = session_id
+            st.session_state.current_pdf_name = "General Chat"
+        
         with st.spinner("🔍 Searching document and generating answer..."):
             event_id = send_rag_query_event_sync(question.strip())
             output = wait_for_run_output(event_id)
@@ -191,22 +244,15 @@ with st.form("rag_query_form", clear_on_submit=True):
             sources = output.get("sources", [])
             num_contexts = output.get("num_contexts", 0)
 
-        # 🎨 Answer Display
-        st.markdown("---")
-        st.markdown("### 📝 Answer")
-        st.markdown('<div class="answer-box">', unsafe_allow_html=True)
+        # 🆕 NEW: Save to chat history
         if answer:
-            st.markdown(answer)
-        else:
-            st.info("No answer could be generated from the document.")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        # 🎨 Sources Display
-        if sources:
-            st.markdown("### 📚 Sources")
-            st.caption(f"Found in {num_contexts} relevant sections")
-            for source in sources:
-                st.markdown(f'<div class="source-item">📄 {source}</div>', unsafe_allow_html=True)
+            chat_manager.add_message(
+                st.session_state.current_session_id,
+                question.strip(),
+                answer,
+                sources
+            )
+            st.rerun()  # Refresh to show new message
 
 # 🎨 Footer
 st.markdown("---")
