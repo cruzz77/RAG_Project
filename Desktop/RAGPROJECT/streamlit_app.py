@@ -10,7 +10,6 @@ from chat_history import ChatHistoryManager  # 🆕 NEW
 
 load_dotenv()
 
-# Initialize chat history manager
 @st.cache_resource
 def get_chat_manager():
     return ChatHistoryManager()
@@ -20,11 +19,10 @@ chat_manager = get_chat_manager()
 st.set_page_config(
     page_title="RAG PDF Assistant",
     page_icon="📚",
-    layout="wide",  # Changed to wide for sidebar
+    layout="wide",  
     initial_sidebar_state="expanded"
 )
 
-# 🎨 Custom CSS
 st.markdown("""
 <style>
     .main-header {
@@ -128,17 +126,15 @@ def wait_for_run_output(event_id: str, timeout_s: float = 120.0, poll_interval_s
             raise TimeoutError(f"Timed out waiting for run output (last status: {last_status})")
         time.sleep(poll_interval_s)
 
-# 🆕 NEW: Initialize session state
 if 'current_session_id' not in st.session_state:
     st.session_state.current_session_id = None
 if 'current_pdf_name' not in st.session_state:
     st.session_state.current_pdf_name = None
 
-# 🆕 SIDEBAR - Chat History
+# Chat History sidebar
 with st.sidebar:
     st.markdown("## 📚 Chat History")
     
-    # Show existing sessions
     sessions = chat_manager.get_all_sessions()
     if sessions:
         st.markdown("### Previous Chats")
@@ -160,7 +156,6 @@ with st.sidebar:
         st.session_state.current_pdf_name = None
         st.rerun()
 
-# 🎨 MAIN CONTENT
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     st.markdown('<h1 class="main-header">📚 RAG PDF Assistant</h1>', unsafe_allow_html=True)
@@ -168,11 +163,9 @@ with col2:
 
 st.markdown("---")
 
-# Show current session info
 if st.session_state.current_session_id and st.session_state.current_pdf_name:
     st.success(f"💬 Currently chatting about: **{st.session_state.current_pdf_name}**")
 
-# 📄 PDF Upload Section
 st.markdown("### 📤 Upload Your PDF Document")
 with st.container():
     uploaded = st.file_uploader(
@@ -187,7 +180,6 @@ if uploaded is not None:
         path = save_uploaded_pdf(uploaded)
         send_rag_ingest_event_sync(path)
         
-        # 🆕 NEW: Create chat session when PDF is uploaded
         if not st.session_state.current_session_id:
             session_id = chat_manager.create_session(path.name)
             st.session_state.current_session_id = session_id
@@ -199,26 +191,20 @@ if uploaded is not None:
 
 st.markdown("---")
 
-# 💬 Current Chat Display
 if st.session_state.current_session_id:
-    # Show chat history
     messages = chat_manager.get_session_history(st.session_state.current_session_id)
     
     if messages:
         st.markdown("### 💬 Conversation History")
         for msg in messages:
-            # User question
             st.markdown(f'<div class="chat-message-user">👤 **You:** {msg.question}</div>', unsafe_allow_html=True)
             
-            # Bot answer
             st.markdown(f'<div class="chat-message-bot">🤖 **Assistant:** {msg.answer}</div>', unsafe_allow_html=True)
             
-            # Sources (collapsible)
             with st.expander(f"📚 Sources ({len(msg.sources)})"):
                 for source in msg.sources:
                     st.write(f"• {source}")
 
-# 💬 Question Input
 st.markdown("### 💭 Ask a Question")
 with st.form("rag_query_form", clear_on_submit=False):
     question = st.text_area(
@@ -232,7 +218,6 @@ with st.form("rag_query_form", clear_on_submit=False):
 
     if submitted and question.strip():
         if not st.session_state.current_session_id:
-            # Create a session even if no PDF uploaded (for general questions)
             session_id = chat_manager.create_session("General Chat")
             st.session_state.current_session_id = session_id
             st.session_state.current_pdf_name = "General Chat"
@@ -244,7 +229,6 @@ with st.form("rag_query_form", clear_on_submit=False):
             sources = output.get("sources", [])
             num_contexts = output.get("num_contexts", 0)
 
-        # 🆕 NEW: Save to chat history
         if answer:
             chat_manager.add_message(
                 st.session_state.current_session_id,
@@ -252,9 +236,9 @@ with st.form("rag_query_form", clear_on_submit=False):
                 answer,
                 sources
             )
-            st.rerun()  # Refresh to show new message
+            st.rerun()  
 
-# 🎨 Footer
+# Footer
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #6c757d; margin-top: 50px;'>
