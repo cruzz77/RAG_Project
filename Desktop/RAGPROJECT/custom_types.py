@@ -18,7 +18,7 @@ class RAGQueryResult(pydantic.BaseModel):
     sources: list[str]
     num_contexts: int
 
-# 🆕 NEW: Chat History Model
+# Chat History Model
 class ChatMessage(pydantic.BaseModel):
     question: str
     answer: str
