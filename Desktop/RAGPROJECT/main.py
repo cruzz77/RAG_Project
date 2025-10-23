@@ -21,7 +21,6 @@ inngest_client = inngest.Inngest(
 )
 
 def get_groq_answer(prompt: str) -> str:
-    """Get LLM response from Groq cloud API"""
     try:
         response = requests.post(
             'https://api.groq.com/openai/v1/chat/completions',
@@ -119,7 +118,7 @@ ANSWER:"""
         answer=answer, 
         sources=found.sources, 
         num_contexts=len(found.contexts)
-    ).model_dump()  # ✅ Proper serialization
+    ).model_dump()  
 
 app = FastAPI()
 
